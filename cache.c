@@ -135,14 +135,47 @@
 	}\
     }\
   }
-/* ECE552 Assignment 4 - BEGIN CODE*/
-
-
-/* ECE552 Assignment 4 - END CODE*/
 
 /* bound sqword_t/dfloat_t to positive int */
 #define BOUND_POS(N)		((int)(MIN(MAX(0, (N)), 2147483647)))
 
+/* ECE552 Assignment 4 - BEGIN CODE*/
+#define INDEX  4
+#define MISS_ONE_INDEX  6
+#define MISS_TWO_INDEX  12
+typedef struct rpt_entry{
+  int tag;
+  md_addr_t prev_addr;
+  int stride;
+  int state;
+} rpt_entry_t;
+
+rpt_entry_t stride_predictor_table[1 << INDEX];
+
+typedef struct miss_two_entry{
+  int tag_one, tag_two;
+
+  md_addr_t next;
+} miss_two_entry_t;
+
+typedef struct miss_one_entry{
+  int tag;
+  md_addr_t next;
+} miss_one_entry_t;
+
+miss_one_entry_t miss_one_table[1 << MISS_ONE_INDEX];
+miss_two_entry_t miss_two_table[1 << MISS_TWO_INDEX];
+
+md_addr_t sub_one_access;
+md_addr_t sub_two_access;
+md_addr_t sub_all_access[2];
+int count_no_issue_one;
+int count_issue_one;
+int count_no_issue_two;
+int count_issue_two;
+
+
+/* ECE552 Assignment 4 - END CODE*/
 /* unlink BLK from the hash table bucket chain in SET */
 static void
 unlink_htab_ent(struct cache_t *cp,		/* cache to update */
@@ -505,6 +538,10 @@ cache_reg_stats(struct cache_t *cp,	/* cache instance */
   stat_reg_counter(sdb, buf, "total number of prefetch hits", &cp->prefetch_hits, 0, NULL);
   sprintf(buf, "%s.prefetch_misses", name);
   stat_reg_counter(sdb, buf, "total number of prefetch misses", &cp->prefetch_misses, 0, NULL);
+  stat_reg_counter(sdb, "count_issue_two", "total number of prefetch misses", &count_issue_two, 0, NULL);
+  stat_reg_counter(sdb, "count_no_issue_two", "total number of prefetch misses", &count_no_issue_two, 0, NULL);
+  stat_reg_counter(sdb, "count_issue_one", "total number of prefetch misses", &count_issue_one, 0, NULL);
+  stat_reg_counter(sdb, "count_no_issue_one", "total number of prefetch misses", &count_no_issue_one, 0, NULL);
 
 
 }
@@ -512,6 +549,7 @@ cache_reg_stats(struct cache_t *cp,	/* cache instance */
 /* Next Line Prefetcher */
 void next_line_prefetcher(struct cache_t *cp, md_addr_t addr) {
   //if (!strcmp(cp->name, "dl1")) {
+  if ( cache_probe(cp, ((addr+(int)cp->bsize)/cp->bsize )* cp->bsize) == 0) {
   cache_access(cp,	/* cache to access */
 	     Read,		/* access type, Read or Write */
 	     ((addr+(int)cp->bsize)/cp->bsize )* cp->bsize,		/* address of access */
@@ -521,17 +559,140 @@ void next_line_prefetcher(struct cache_t *cp, md_addr_t addr) {
 	     NULL,		/* for return of user data ptr */
 	     NULL,	/* for address of replaced block */
 	     1);		/* 1 if the access is a prefetch, 0 if it is not */
+  }
   //}
 }
 
 /* Open Ended Prefetcher */
 void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
-	; 
+  if (!strcmp(cp->name, "dl1")) {
+  unsigned addr_val = addr;
+  int index = ((addr_val>>5) % (1 << (MISS_ONE_INDEX)));
+  int tag = ((addr_val>>5) / (1 << (MISS_ONE_INDEX)));
+  int tag_one, tag_two;
+  md_addr_t cand_one_addr, cand_two_addr;
+  if (miss_one_table[index].tag = tag) {
+    md_addr_t cand_one_addr = miss_one_table[index].next;
+    //printf("hi\n");
+  } else {
+  } 
+  miss_one_table[(((unsigned)sub_one_access>>5) % (1 << (MISS_ONE_INDEX)))].tag = (sub_one_access>>5 / (1 << (MISS_ONE_INDEX)));
+  miss_one_table[(((unsigned)sub_one_access>>5) % (1 << (MISS_ONE_INDEX)))].next = addr;
+  if (sub_one_access != 0) {
+    index = (((unsigned)sub_one_access>>5) % (1 << (MISS_TWO_INDEX))) ^ ((addr>>5) % (1 << (MISS_TWO_INDEX)));
+    tag_one = ((addr_val>>5) / (1 << (MISS_TWO_INDEX)));
+    tag_two = (((unsigned)sub_one_access>>5) / (1 << (MISS_TWO_INDEX)));
+    if (miss_two_table[index].tag_one == tag_one && miss_two_table[index].tag_two == tag_two) {
+      cand_two_addr = miss_two_table[index].next;
+    //printf("fdsfdsafsadhi\n");
+    } else {
+    //printf("fdfdsfdafdsafsfdsafsadhi\n");
+    } 
+  } 
+  index = (((unsigned)sub_two_access>>5) % (1 << (MISS_TWO_INDEX))) ^ (((unsigned)sub_one_access>>5) % (1 << (MISS_TWO_INDEX)));
+  miss_two_table[index].tag_one = (((unsigned)sub_one_access>>5) / (1 << (MISS_TWO_INDEX)));
+  miss_two_table[index].tag_two = (((unsigned)sub_two_access>>5) / (1 << (MISS_TWO_INDEX)));
+  miss_two_table[index].next = addr;
+
+
+  if  (cand_two_addr != 0 ) {
+    if (cache_probe(cp, ((cand_two_addr)/cp->bsize )* cp->bsize) == 0) {
+  cache_access(cp,	/* cache to access */
+	     Read,		/* access type, Read or Write */
+	     ((cand_two_addr)/cp->bsize )* cp->bsize,		/* address of access */
+	     stdout,			/* ptr to buffer for input/output */
+	     (int)cp->bsize,		/* number of bytes to access */
+	     0,		/* time of access */
+	     NULL,		/* for return of user data ptr */
+	     NULL,	/* for address of replaced block */
+	     1);		/* 1 if the access is a prefetch, 0 if it is not */
+      //printf("12376547645756475745756abcd\n");
+      count_issue_two += 1;
+    } else {
+      //printf("abcd\n");
+      count_no_issue_two += 1;
+    } 
+  } else if (cand_one_addr != 0 && cache_probe(cp, ((cand_one_addr)/cp->bsize )* cp->bsize) == 0) {
+  cache_access(cp,	/* cache to access */
+	     Read,		/* access type, Read or Write */
+	     ((cand_one_addr)/cp->bsize )* cp->bsize,		/* address of access */
+	     stdout,			/* ptr to buffer for input/output */
+	     (int)cp->bsize,		/* number of bytes to access */
+	     0,		/* time of access */
+	     NULL,		/* for return of user data ptr */
+	     NULL,	/* for address of replaced block */
+	     1);		/* 1 if the access is a prefetch, 0 if it is not */
+      count_issue_one += 1;
+  }
+  //if (sub_one_access == addr) {
+  //    count_no_issue_one += 1;
+  //} else {
+    sub_two_access = sub_one_access;
+    sub_one_access = addr;
+  //}
+ }
+  
 }
 
 /* Stride Prefetcher */
 void stride_prefetcher(struct cache_t *cp, md_addr_t addr) {
-	; 
+  unsigned pc = get_PC();
+  int tag = ((pc >> 3)/(1 << INDEX));
+  int index = ((pc >> 3)%(1 << INDEX));
+  int new_stride; 
+  if (stride_predictor_table[index].tag != tag) {
+    stride_predictor_table[index].tag = tag;
+    stride_predictor_table[index].prev_addr = addr;
+    stride_predictor_table[index].stride = 0;
+    stride_predictor_table[index].state = 0;
+  } else {
+    new_stride = addr - stride_predictor_table[index].prev_addr;
+    if (stride_predictor_table[index].state == 0) {
+      if (stride_predictor_table[index].stride == new_stride) {
+        stride_predictor_table[index].state = 2;
+        stride_predictor_table[index].stride = new_stride;
+      } else {
+        stride_predictor_table[index].state = 1;
+        stride_predictor_table[index].stride = new_stride;
+      }
+    } else if (stride_predictor_table[index].state == 1) {
+      if (stride_predictor_table[index].stride == new_stride) {
+        stride_predictor_table[index].state = 2;
+        stride_predictor_table[index].stride = new_stride;
+      } else {
+        stride_predictor_table[index].state = 3;
+        stride_predictor_table[index].stride = new_stride;
+      }
+    } else if (stride_predictor_table[index].state == 2) {
+      if (stride_predictor_table[index].stride == new_stride) {
+        stride_predictor_table[index].state = 2;
+        stride_predictor_table[index].stride = new_stride;
+      } else {
+        stride_predictor_table[index].state = 0;
+      }
+    } else if (stride_predictor_table[index].state == 3) {
+      if (stride_predictor_table[index].stride == new_stride) {
+        stride_predictor_table[index].state = 1;
+        stride_predictor_table[index].stride = new_stride;
+      } else {
+        stride_predictor_table[index].state = 3;
+        stride_predictor_table[index].stride = new_stride;
+      }
+    }
+  }
+  if (stride_predictor_table[index].state < 3 && cache_probe(cp, ((addr+(int)stride_predictor_table[index].stride)/cp->bsize )* cp->bsize) == 0) {
+
+  cache_access(cp,	/* cache to access */
+	     Read,		/* access type, Read or Write */
+	     ((addr+(int)stride_predictor_table[index].stride)/cp->bsize )* cp->bsize,		/* address of access */
+	     stdout,			/* ptr to buffer for input/output */
+	     (int)cp->bsize,		/* number of bytes to access */
+	     0,		/* time of access */
+	     NULL,		/* for return of user data ptr */
+	     NULL,	/* for address of replaced block */
+	     1);		/* 1 if the access is a prefetch, 0 if it is not */
+  }
+  stride_predictor_table[index].prev_addr = addr;
 }
 /* ECE552 Assignment 4 - END CODE*/
 
